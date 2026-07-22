@@ -82,6 +82,7 @@ public class MainActivity extends Activity {
                 if (!isBootstrapInstalled()) {
                     installBootstrap();
                 }
+                fixPermissions();
                 copyServerFile();
                 startNodeServer();
                 waitForServer();
@@ -163,10 +164,6 @@ public class MainActivity extends Activity {
                     fos.write(buffer, 0, len);
                 }
                 fos.close();
-
-                if (name.startsWith("bin/")) {
-                    outFile.setExecutable(true, false);
-                }
             }
             zis.closeEntry();
         }
@@ -174,6 +171,35 @@ public class MainActivity extends Activity {
         is.close();
 
         createSymlinks();
+        fixPermissions();
+    }
+
+    private void fixPermissions() {
+        try {
+            File binDir = new File(prefixDir, "bin");
+            File libDir = new File(prefixDir, "lib");
+
+            if (binDir.exists()) {
+                Process chmodBin = Runtime.getRuntime().exec(
+                    new String[]{"chmod", "-R", "755", binDir.getAbsolutePath()});
+                chmodBin.waitFor();
+            }
+
+            if (libDir.exists()) {
+                Process chmodLib = Runtime.getRuntime().exec(
+                    new String[]{"chmod", "-R", "755", libDir.getAbsolutePath()});
+                chmodLib.waitFor();
+            }
+
+            File tmpDir = new File(prefixDir, "tmp");
+            if (!tmpDir.exists()) {
+                tmpDir.mkdirs();
+            }
+            Process chmodTmp = Runtime.getRuntime().exec(
+                new String[]{"chmod", "777", tmpDir.getAbsolutePath()});
+            chmodTmp.waitFor();
+        } catch (Exception e) {
+        }
     }
 
     private void createSymlinks() {
