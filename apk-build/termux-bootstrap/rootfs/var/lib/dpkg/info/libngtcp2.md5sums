@@ -1,0 +1,14 @@
+ab7f5fb398f9178c6bc3518c08687692  data/data/com.termux/files/usr/lib/pkgconfig/libngtcp2.pc
+3fec5d61fa97ad5e0e55539d402e8a51  data/data/com.termux/files/usr/lib/pkgconfig/libngtcp2_crypto_ossl.pc
+80f36ab9d79c932eee7b9f6f9faa4fca  data/data/com.termux/files/usr/lib/cmake/ngtcp2/ngtcp2ConfigVersion.cmake
+2209a1a67bec8056e38cec52f8f2e9b0  data/data/com.termux/files/usr/lib/cmake/ngtcp2/ngtcp2Targets.cmake
+4292ba6ba8e9c35fec6a88610df15f78  data/data/com.termux/files/usr/lib/cmake/ngtcp2/ngtcp2Config.cmake
+c60b81010a22d61673126dc52655ad03  data/data/com.termux/files/usr/lib/cmake/ngtcp2/ngtcp2Targets-release.cmake
+a688df02f132a9640ba6fb6c1e262e5a  data/data/com.termux/files/usr/lib/libngtcp2_crypto_ossl.so
+cf944b929c828913daf922455f6e74ce  data/data/com.termux/files/usr/lib/libngtcp2.so
+33f9e74ffb3c7668af774086dbc77de3  data/data/com.termux/files/usr/include/ngtcp2/version.h
+640f4d2087ddd1d743e184110f18e630  data/data/com.termux/files/usr/include/ngtcp2/ngtcp2_crypto_ossl.h
+7772853b3c84e237e850de7e19dccfbb  data/data/com.termux/files/usr/include/ngtcp2/ngtcp2.h
+421dc6a29c6c5ad6ae23a1bd89681fc2  data/data/com.termux/files/usr/include/ngtcp2/ngtcp2_crypto.h
+de0966c8ff4f62661a3da92967a75434  data/data/com.termux/files/usr/share/doc/libngtcp2/copyright
+53590815d7bf682fae429da27bf038da  data/data/com.termux/files/usr/share/doc/ngtcp2/README.rst
