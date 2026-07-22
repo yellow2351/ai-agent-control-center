@@ -1,0 +1,6 @@
+588c0acb78f729984c541b4c02d9a180  data/data/com.termux/files/usr/lib/pkgconfig/libnghttp3.pc
+e709546d512077395edacd69da5c9fa6  data/data/com.termux/files/usr/lib/libnghttp3.so
+fd98a77b470e1dd546b4ab41101a8c69  data/data/com.termux/files/usr/include/nghttp3/nghttp3.h
+ed67f5ac6bb2bd7d479438cac7895cc8  data/data/com.termux/files/usr/include/nghttp3/version.h
+2005b8c7595329cc8ab211085467600a  data/data/com.termux/files/usr/share/doc/libnghttp3/copyright
+7819047f4646e5061432976c07b17aa6  data/data/com.termux/files/usr/share/doc/nghttp3/README.rst
