@@ -1,0 +1,118 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-color: #e0e5ec;
+  color: #4a5568;
+}
+
+.dark body {
+  background-color: #2a2e35;
+  color: #e2e8f0;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #a3b1c6;
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #3a3f48;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #8b9ab0;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #4a5058;
+}
+
+/* Neumorphism utility classes */
+@layer utilities {
+  .neu-card {
+    @apply bg-neu-bg rounded-2xl shadow-neu-convex transition-all duration-300;
+  }
+
+  .dark .neu-card {
+    @apply bg-neu-bgDark shadow-neu-dark-convex;
+  }
+
+  .neu-card-inset {
+    @apply bg-neu-bg rounded-2xl shadow-neu-concave transition-all duration-300;
+  }
+
+  .dark .neu-card-inset {
+    @apply bg-neu-bgDark shadow-neu-dark-concave;
+  }
+
+  .neu-btn {
+    @apply bg-neu-bg rounded-xl shadow-neu-convex-sm transition-all duration-200 
+           hover:shadow-neu-flat active:shadow-neu-pressed active:scale-[0.98]
+           flex items-center justify-center gap-2 font-medium;
+  }
+
+  .dark .neu-btn {
+    @apply bg-neu-bgDark shadow-neu-dark-convex 
+           hover:shadow-neu-dark-convex active:shadow-neu-dark-pressed;
+  }
+
+  .neu-btn-primary {
+    @apply bg-gradient-to-br from-neu-accentLight to-neu-accent text-white rounded-xl 
+           shadow-neu-convex-sm transition-all duration-200
+           hover:from-neu-accent hover:to-neu-accentDark
+           active:shadow-neu-pressed active:scale-[0.98]
+           flex items-center justify-center gap-2 font-medium;
+  }
+
+  .neu-input {
+    @apply bg-neu-bg rounded-xl shadow-neu-concave-sm px-4 py-3 
+           outline-none transition-all duration-200
+           focus:shadow-neu-concave text-neu-text placeholder-neu-textLight;
+  }
+
+  .dark .neu-input {
+    @apply bg-neu-bgDark shadow-neu-dark-concave text-neu-textDark;
+  }
+
+  .neu-icon-btn {
+    @apply w-10 h-10 rounded-full bg-neu-bg shadow-neu-convex-sm 
+           flex items-center justify-center transition-all duration-200
+           hover:shadow-neu-flat active:shadow-neu-pressed active:scale-95
+           text-neu-text hover:text-neu-accent;
+  }
+
+  .dark .neu-icon-btn {
+    @apply bg-neu-bgDark shadow-neu-dark-convex text-neu-textDark;
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-r from-neu-accent to-neu-accentLight bg-clip-text text-transparent;
+  }
+}

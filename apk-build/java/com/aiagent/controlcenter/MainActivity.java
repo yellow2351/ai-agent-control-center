@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -11,67 +12,85 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.io.InputStreamReader;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+/**
+ * AI Agent 中控台 - nodejs-mobile 集成版 (v5.0.0)
+ *
+ * 使用 nodejs-mobile 的 libnode.so 通过 JNI 在 App 进程内启动 Node.js
+ * 完全避开 SELinux exec 限制，无需 chmod 权限
+ */
 public class MainActivity extends Activity {
-    private WebView webView;
-    private Process nodeProcess;
-    private File prefixDir;
-    private File dataDir;
-    private Handler mainHandler;
-    private StringBuilder debugLog;
+    private static final String TAG = "MainActivity";
     private static final int SERVER_PORT = 3001;
-    private static final String BOOTSTRAP_ASSET = "bootstrap-aarch64.zip";
-    private static final String SERVER_FILE = "server.cjs";
+    private static final String APP_VERSION = "5.0.1";
+    private static final String ASSETS_ZIP = "sillytavern.zip";
+
+    private WebView webView;
+    private Handler mainHandler;
+    private Thread nodeThread;
+    private long startTime;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        prefixDir = new File(getFilesDir(), "usr");
-        dataDir = new File(getFilesDir(), "app-data");
+        startTime = System.currentTimeMillis();
         mainHandler = new Handler(Looper.getMainLooper());
-        debugLog = new StringBuilder();
 
         webView = new WebView(this);
         setContentView(webView);
 
-        WebSettings webSettings = webView.getSettings();
-        webSettings.setJavaScriptEnabled(true);
-        webSettings.setDomStorageEnabled(true);
-        webSettings.setAllowFileAccess(true);
-        webSettings.setAllowContentAccess(true);
-        webSettings.setAllowFileAccessFromFileURLs(true);
-        webSettings.setAllowUniversalAccessFromFileURLs(true);
-        webSettings.setLoadWithOverviewMode(true);
-        webSettings.setUseWideViewPort(true);
-        webSettings.setBuiltInZoomControls(true);
-        webSettings.setDisplayZoomControls(false);
-        webSettings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        webSettings.setDatabaseEnabled(true);
-        webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        webSettings.setMediaPlaybackRequiresUserGesture(false);
+        WebSettings ws = webView.getSettings();
+        ws.setJavaScriptEnabled(true);
+        ws.setDomStorageEnabled(true);
+        ws.setAllowFileAccess(true);
+        ws.setAllowContentAccess(true);
+        ws.setLoadWithOverviewMode(true);
+        ws.setUseWideViewPort(true);
+        ws.setCacheMode(WebSettings.LOAD_DEFAULT);
+        ws.setDatabaseEnabled(true);
+        ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        ws.setMediaPlaybackRequiresUserGesture(false);
 
         webView.setWebViewClient(new MyWebViewClient());
         webView.setWebChromeClient(new WebChromeClient());
 
         showLoading();
-        Thread t = new Thread(new InitRunnable());
-        t.start();
+
+        // 在后台线程初始化
+        Thread initThread = new Thread(new InitRunnable());
+        initThread.start();
     }
 
-    private void log(String msg) {
-        debugLog.append(msg).append("\n");
+    private void showLoading() {
+        String html = "<html><body style='background:#e0e5ec;display:flex;align-items:center;" +
+            "justify-content:center;height:100vh;margin:0;font-family:system-ui'>" +
+            "<div style='text-align:center;color:#333'>" +
+            "<div style='font-size:20px;font-weight:600;margin-bottom:12px'>AI Agent 中控台</div>" +
+            "<div style='font-size:14px;color:#666'>正在启动服务，请稍候...</div>" +
+            "</div></body></html>";
+        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    private void showError(String error) {
+        String html = "<html><body style='background:#e0e5ec;margin:0;font-family:system-ui;padding:16px'>" +
+            "<div style='color:#333'>" +
+            "<div style='font-size:20px;font-weight:600;margin-bottom:12px;color:#dc2626'>启动失败</div>" +
+            "<div style='font-size:14px;color:#666;white-space:pre-wrap;word-break:break-all'>" +
+            escapeHtml(error) + "</div>" +
+            "</div></body></html>";
+        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+    }
+
+    private String escapeHtml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private class MyWebViewClient extends WebViewClient {
@@ -86,107 +105,136 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             try {
-                log("开始初始化...");
-                log("filesDir: " + getFilesDir().getAbsolutePath());
-                log("prefixDir: " + prefixDir.getAbsolutePath());
+                Log.i(TAG, "=== 初始化开始 ===");
 
-                if (!isBootstrapInstalled()) {
-                    log("Bootstrap 未安装，开始解压...");
-                    installBootstrap();
-                    log("Bootstrap 解压完成");
+                // 1. 检查 Native 库加载
+                if (!NodeBridge.isLoaded()) {
+                    throw new RuntimeException("Native libraries (libnode.so / libnode-bridge.so) failed to load");
+                }
+                Log.i(TAG, "Native libraries loaded OK");
+
+                // 2. 解压 assets
+                File projectDir = new File(getFilesDir(), "sillytavern");
+                if (!isProjectExtracted(projectDir)) {
+                    Log.i(TAG, "解压 assets 到 " + projectDir.getAbsolutePath());
+                    extractAssets(ASSETS_ZIP, projectDir);
+                    // 写入版本标记
+                    File versionFile = new File(projectDir, ".version");
+                    FileOutputStream fos = new FileOutputStream(versionFile);
+                    fos.write(APP_VERSION.getBytes());
+                    fos.close();
+                    Log.i(TAG, "解压完成");
                 } else {
-                    log("Bootstrap 已安装");
+                    Log.i(TAG, "assets 已是最新版本，跳过解压");
                 }
 
-                log("开始修复权限...");
-                fixPermissions();
-                log("权限修复完成");
+                // 3. 查找启动脚本（wrapper.js 会设置正确的 cwd 和 env）
+                File serverJs = new File(projectDir, "wrapper.js");
+                if (!serverJs.exists()) {
+                    serverJs = new File(projectDir, "server.cjs");
+                }
+                if (!serverJs.exists()) {
+                    throw new RuntimeException("wrapper.js / server.cjs not found in extracted assets");
+                }
+                Log.i(TAG, "Server script: " + serverJs.getAbsolutePath());
 
-                File nodeBin = new File(prefixDir, "bin/node");
-                log("node 文件存在: " + nodeBin.exists());
-                log("node 可执行: " + nodeBin.canExecute());
-                log("node 可读: " + nodeBin.canRead());
-                log("node 路径: " + nodeBin.getAbsolutePath());
+                // 4. 构建启动参数
+                final String serverPath = serverJs.getAbsolutePath();
+                final String projectPath = projectDir.getAbsolutePath();
+                final String nodeModulesPath = new File(projectDir, "node_modules").getAbsolutePath();
 
-                copyServerFile();
-                log("服务文件已复制");
+                // 5. 启动 Node.js（在独立线程中，因为 node::Start 会阻塞）
+                nodeThread = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            String[] args = new String[] {
+                                "node",
+                                serverPath
+                            };
 
-                startNodeServer();
-                log("Node 服务已启动");
+                            Log.i(TAG, "启动 Node.js...");
+                            Log.i(TAG, "  args[0] = " + args[0]);
+                            Log.i(TAG, "  args[1] = " + args[1]);
+                            Log.i(TAG, "  NODE_PATH = " + nodeModulesPath);
 
-                waitForServer();
-                log("服务端口已就绪");
+                            int exitCode = NodeBridge.startNode(args, nodeModulesPath);
+                            Log.w(TAG, "Node.js exited with code: " + exitCode);
+                        } catch (Exception e) {
+                            Log.e(TAG, "Node.js thread error: " + e.getMessage(), e);
+                        }
+                    }
+                });
+                nodeThread.start();
 
-                mainHandler.post(new LoadUrlRunnable());
-            } catch (Exception e) {
-                log("错误: " + e.getMessage());
-                String fullError = e.getMessage() + "\n\n--- 调试日志 ---\n" + debugLog.toString();
-                mainHandler.post(new ErrorRunnable(fullError));
+                // 6. 等待服务就绪
+                Log.i(TAG, "等待服务端口就绪...");
+                boolean ready = waitForPort(SERVER_PORT, 30);
+                if (!ready) {
+                    throw new RuntimeException("服务启动超时（30秒）");
+                }
+
+                long elapsed = System.currentTimeMillis() - startTime;
+                Log.i(TAG, "=== 启动完成，耗时 " + elapsed + "ms ===");
+
+                // 7. 加载前端
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        webView.loadUrl("http://127.0.0.1:" + SERVER_PORT + "/");
+                    }
+                });
+
+            } catch (final Exception e) {
+                Log.e(TAG, "初始化失败", e);
+                mainHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(MainActivity.this,
+                            "启动失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        showError(e.getMessage());
+                    }
+                });
             }
         }
     }
 
-    private class LoadUrlRunnable implements Runnable {
-        @Override
-        public void run() {
-            webView.loadUrl("http://127.0.0.1:" + SERVER_PORT + "/");
+    /**
+     * 检查项目是否已经解压且版本匹配
+     */
+    private boolean isProjectExtracted(File projectDir) {
+        if (!projectDir.exists()) return false;
+        File versionFile = new File(projectDir, ".version");
+        if (!versionFile.exists()) return false;
+        try {
+            InputStream is = new java.io.FileInputStream(versionFile);
+            byte[] buf = new byte[64];
+            int n = is.read(buf);
+            is.close();
+            String version = new String(buf, 0, n).trim();
+            return APP_VERSION.equals(version);
+        } catch (IOException e) {
+            return false;
         }
     }
 
-    private class ErrorRunnable implements Runnable {
-        private String error;
-        ErrorRunnable(String error) { this.error = error; }
-        @Override
-        public void run() {
-            Toast.makeText(MainActivity.this,
-                "启动失败: " + error,
-                Toast.LENGTH_LONG).show();
-            showLoadingError(error);
+    /**
+     * 从 assets 解压 zip 文件
+     */
+    private void extractAssets(String assetName, File destDir) throws IOException {
+        if (!destDir.exists()) {
+            destDir.mkdirs();
         }
-    }
 
-    private void showLoading() {
-        String html = "<html><body style='background:#e0e5ec;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui'>" +
-            "<div style='text-align:center;color:#333'>" +
-            "<div style='font-size:20px;font-weight:600;margin-bottom:12px'>AI Agent 中控台</div>" +
-            "<div style='font-size:14px;color:#666'>正在启动服务，请稍候...</div>" +
-            "</div></body></html>";
-        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-    }
-
-    private void showLoadingError(String error) {
-        String html = "<html><body style='background:#e0e5ec;margin:0;font-family:system-ui;padding:16px'>" +
-            "<div style='color:#333'>" +
-            "<div style='font-size:20px;font-weight:600;margin-bottom:12px;color:#dc2626'>启动失败</div>" +
-            "<div style='font-size:14px;color:#666;white-space:pre-wrap;word-break:break-all'>" + escapeHtml(error) + "</div>" +
-            "</div></body></html>";
-        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-    }
-
-    private String escapeHtml(String text) {
-        if (text == null) return "";
-        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-    }
-
-    private boolean isBootstrapInstalled() {
-        File nodeBin = new File(prefixDir, "bin/node");
-        return nodeBin.exists() && nodeBin.canExecute();
-    }
-
-    private void installBootstrap() throws IOException {
-        InputStream is = getAssets().open(BOOTSTRAP_ASSET);
+        InputStream is = getAssets().open(assetName);
         ZipInputStream zis = new ZipInputStream(is);
         ZipEntry entry;
-
         byte[] buffer = new byte[8192];
 
         while ((entry = zis.getNextEntry()) != null) {
             String name = entry.getName();
-            if (name.equals("SYMLINKS.txt")) {
-                continue;
-            }
+            File outFile = new File(destDir, name);
 
-            File outFile = new File(prefixDir, name);
             if (entry.isDirectory()) {
                 outFile.mkdirs();
             } else {
@@ -202,215 +250,39 @@ public class MainActivity extends Activity {
         }
         zis.close();
         is.close();
-
-        createSymlinks();
     }
 
-    private void fixPermissions() {
-        String chmodPath = "/system/bin/chmod";
-
-        File binDir = new File(prefixDir, "bin");
-        if (binDir.exists()) {
-            try {
-                Process p = Runtime.getRuntime().exec(
-                    new String[]{chmodPath, "-R", "755", binDir.getAbsolutePath()});
-                p.waitFor();
-                log("chmod bin 结果: " + p.exitValue());
-            } catch (Exception e) {
-                log("chmod bin 失败: " + e.getMessage());
-            }
-        }
-
-        File libDir = new File(prefixDir, "lib");
-        if (libDir.exists()) {
-            try {
-                Process p = Runtime.getRuntime().exec(
-                    new String[]{chmodPath, "-R", "755", libDir.getAbsolutePath()});
-                p.waitFor();
-                log("chmod lib 结果: " + p.exitValue());
-            } catch (Exception e) {
-                log("chmod lib 失败: " + e.getMessage());
-            }
-        }
-
-        File tmpDir = new File(prefixDir, "tmp");
-        if (!tmpDir.exists()) {
-            tmpDir.mkdirs();
-        }
-        try {
-            Process p = Runtime.getRuntime().exec(
-                new String[]{chmodPath, "777", tmpDir.getAbsolutePath()});
-            p.waitFor();
-            log("chmod tmp 结果: " + p.exitValue());
-        } catch (Exception e) {
-            log("chmod tmp 失败: " + e.getMessage());
-        }
-
-        File nodeBin = new File(prefixDir, "bin/node");
-        if (nodeBin.exists()) {
-            boolean execOk = nodeBin.canExecute();
-            log("node canExecute: " + execOk);
-            if (!execOk) {
-                try {
-                    Process p = Runtime.getRuntime().exec(
-                        new String[]{chmodPath, "755", nodeBin.getAbsolutePath()});
-                    p.waitFor();
-                    log("chmod node 结果: " + p.exitValue());
-                } catch (Exception e) {
-                    log("chmod node 失败: " + e.getMessage());
-                }
-                log("node canExecute 再次检查: " + nodeBin.canExecute());
-            }
-        }
-    }
-
-    private void createSymlinks() {
-        File symlinksFile = new File(prefixDir, "SYMLINKS.txt");
-        if (!symlinksFile.exists()) return;
-
-        BufferedReader reader = null;
-        try {
-            reader = new BufferedReader(new FileReader(symlinksFile));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                int arrowIdx = line.indexOf("\u2190");
-                if (arrowIdx < 0) continue;
-                String target = line.substring(0, arrowIdx);
-                String source = line.substring(arrowIdx + 1);
-
-                if (target.startsWith("/data/data/com.termux/files/usr/")) {
-                    target = target.substring("/data/data/com.termux/files/usr/".length());
-                }
-
-                File targetFile = new File(prefixDir, target);
-                File sourceFile = new File(prefixDir, source);
-                if (!targetFile.exists() && sourceFile.exists()) {
-                    try {
-                        ProcessBuilder pb = new ProcessBuilder("ln", "-s",
-                            sourceFile.getAbsolutePath(), targetFile.getAbsolutePath());
-                        pb.start().waitFor();
-                    } catch (Exception e) {
-                    }
-                }
-            }
-        } catch (IOException e) {
-        } finally {
-            if (reader != null) {
-                try { reader.close(); } catch (IOException e) {}
-            }
-        }
-    }
-
-    private void copyServerFile() throws IOException {
-        File serverFile = new File(getFilesDir(), SERVER_FILE);
-        if (serverFile.exists()) {
-            serverFile.delete();
-        }
-
-        InputStream is = getAssets().open(SERVER_FILE);
-        FileOutputStream fos = new FileOutputStream(serverFile);
-        byte[] buffer = new byte[8192];
-        int len;
-        while ((len = is.read(buffer)) > 0) {
-            fos.write(buffer, 0, len);
-        }
-        fos.close();
-        is.close();
-    }
-
-    private void startNodeServer() throws IOException {
-        File nodeBin = new File(prefixDir, "bin/node");
-        File serverFile = new File(getFilesDir(), SERVER_FILE);
-
-        if (!dataDir.exists()) {
-            dataDir.mkdirs();
-        }
-
-        List<String> command = new ArrayList<String>();
-        command.add(nodeBin.getAbsolutePath());
-        command.add(serverFile.getAbsolutePath());
-
-        ProcessBuilder pb = new ProcessBuilder(command);
-        Map<String, String> env = pb.environment();
-        env.put("PATH", prefixDir.getAbsolutePath() + "/bin");
-        env.put("PREFIX", prefixDir.getAbsolutePath());
-        env.put("LD_LIBRARY_PATH", prefixDir.getAbsolutePath() + "/lib");
-        env.put("HOME", getFilesDir().getAbsolutePath());
-        env.put("TMPDIR", new File(prefixDir, "tmp").getAbsolutePath());
-        env.put("DATA_DIR", dataDir.getAbsolutePath());
-        env.put("PUBLIC_DIR", "");
-        env.put("PORT", String.valueOf(SERVER_PORT));
-
-        pb.directory(getFilesDir());
-
-        try {
-            nodeProcess = pb.start();
-        } catch (IOException e) {
-            String extra = "启动失败详情: " + e.getMessage() +
-                "\nnode路径: " + nodeBin.getAbsolutePath() +
-                "\nnode存在: " + nodeBin.exists() +
-                "\nnode可执行: " + nodeBin.canExecute() +
-                "\n工作目录: " + getFilesDir().getAbsolutePath() +
-                "\n\n环境变量:" +
-                "\nPATH=" + env.get("PATH") +
-                "\nLD_LIBRARY_PATH=" + env.get("LD_LIBRARY_PATH");
-            throw new IOException(extra, e);
-        }
-
-        InputStream stdout = nodeProcess.getInputStream();
-        InputStream stderr = nodeProcess.getErrorStream();
-
-        Thread outThread = new Thread(new StreamReader(stdout, false));
-        outThread.start();
-
-        Thread errThread = new Thread(new StreamReader(stderr, true));
-        errThread.start();
-    }
-
-    private class StreamReader implements Runnable {
-        private InputStream is;
-        private boolean isError;
-        StreamReader(InputStream is, boolean isError) {
-            this.is = is;
-            this.isError = isError;
-        }
-        @Override
-        public void run() {
-            try {
-                byte[] buf = new byte[1024];
-                while (true) {
-                    int n = is.read(buf);
-                    if (n <= 0) break;
-                }
-            } catch (IOException e) {}
-        }
-    }
-
-    private void waitForServer() throws InterruptedException {
-        int maxWait = 30;
-        for (int i = 0; i < maxWait; i++) {
+    /**
+     * 等待端口就绪
+     */
+    private boolean waitForPort(int port, int maxWaitSeconds) {
+        for (int i = 0; i < maxWaitSeconds; i++) {
             try {
                 java.net.Socket socket = new java.net.Socket();
-                socket.connect(new java.net.InetSocketAddress("127.0.0.1", SERVER_PORT), 500);
+                socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), 500);
                 socket.close();
-                Thread.sleep(500);
-                return;
+                Thread.sleep(300);
+                return true;
             } catch (IOException e) {
+                // 端口未就绪
+            } catch (InterruptedException e) {
+                return false;
+            }
+            try {
                 Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                return false;
             }
         }
-        throw new InterruptedException("服务启动超时");
+        return false;
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        if (nodeProcess != null) {
-            nodeProcess.destroy();
-            try {
-                nodeProcess.waitFor();
-            } catch (InterruptedException e) {
-            }
+        if (nodeThread != null && nodeThread.isAlive()) {
+            // 注意：无法优雅地停止 Node.js 线程，因为它在 native 代码中运行
+            nodeThread.interrupt();
         }
     }
 
