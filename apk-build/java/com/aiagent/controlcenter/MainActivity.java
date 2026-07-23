@@ -113,7 +113,7 @@ public class MainActivity extends Activity {
     private boolean isRootfsReady() {
         return rootfsDir.exists()
             && new File(rootfsDir, "bin").exists()
-            && new File(rootfsDir, "usr/bin/node").exists()
+            && new File(rootfsDir, "usr/local/bin/node").exists()
             && new File(rootfsDir, "opt/control-center/server.js").exists();
     }
 
