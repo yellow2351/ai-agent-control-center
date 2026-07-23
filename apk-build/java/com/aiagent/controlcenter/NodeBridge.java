@@ -12,13 +12,15 @@ public class NodeBridge {
 
     static {
         try {
+            System.loadLibrary("c++_shared");
+            Log.d(TAG, "libc++_shared.so loaded");
             System.loadLibrary("node");
             Log.d(TAG, "libnode.so loaded");
             System.loadLibrary("node-bridge");
             Log.d(TAG, "libnode-bridge.so loaded");
             librariesLoaded = true;
         } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "Failed to load native libraries: " + e.getMessage());
+            Log.e(TAG, "Failed to load native libraries: " + e.getMessage(), e);
             librariesLoaded = false;
         }
     }

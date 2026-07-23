@@ -32,8 +32,11 @@ apk-build/include/
 apk-build/jni/libs/
 apk-build/jni/obj/
 apk-build/build/unsigned-aligned*.apk
+apk-build/build/aligned-*.apk
 apk-build/build/base*.apk
 apk-build/build/app-release-new*.apk
+apk-build/build/app-release-v*.apk
+apk-build/build/*.idsig
 apk-build/assets-clean/
 
 # nodejs-mobile prebuilt binaries (downloaded, not source)
