@@ -17,32 +17,30 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.Map;
 
 /**
- * AI Agent 中控台 v7.0.0
+ * AI Agent 中控台 v7.1.0
  *
- * 架构参考 SillyDroid：内置独立 Linux 运行环境 + WebView 内核
- * 使用 proot 启动 Debian rootfs，在其中运行 Node.js 控制中心服务器
- * 零 JNI，零 .so 加载，完全避免 Native 库兼容性问题
+ * 架构：魔改 Termux Runtime 直接运行 Node.js，无需 proot
+ * 参考 SillyDroid 思路：内置独立 Linux 运行环境 + WebView 内核
+ * 零 JNI，零 .so 加载，零 proot 开销
  */
 public class MainActivity extends Activity {
     private static final String TAG = "ControlCenter";
-    private static final String APP_VERSION = "7.0.0";
+    private static final String APP_VERSION = "7.1.0";
     private static final int SERVER_PORT = 3001;
-    private static final int MAX_STARTUP_WAIT = 60; // 最多等 60 秒
 
     private WebView webView;
-    private Handler handler = new Handler(Looper.getMainLooper());
-    private boolean prootStarted = false;
     private File appDir;
-    private File rootfsDir;
-    private File prootBin;
+    private File runtimeDir;
+    private Process nodeProcess;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Log.i(TAG, "=== AI Agent 中控台 v" + APP_VERSION + " 启动 ===");
-        Log.i(TAG, "架构: proot + Debian rootfs + Node.js + WebView");
+        Log.i(TAG, "架构: Termux Runtime + Node.js + WebView（零 proot）");
 
         // 初始化 WebView
         webView = new WebView(this);
@@ -52,9 +50,9 @@ public class MainActivity extends Activity {
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         ws.setAllowFileAccess(true);
+        ws.setAllowContentAccess(true);
         ws.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        ws.setAllowContentAccess(true);
 
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
@@ -64,119 +62,103 @@ public class MainActivity extends Activity {
             }
         });
 
-        // 立即加载启动页（轮询等待后端就绪）
+        // 立即加载启动页
         webView.loadUrl("file:///android_asset/launcher.html");
 
-        // 后台启动 proot 环境
+        // 后台启动 Termux Runtime
         appDir = getFilesDir();
-        rootfsDir = new File(appDir, "debian-rootfs");
-        prootBin = new File(appDir, "proot");
+        runtimeDir = new File(appDir, "termux-runtime");
 
-        new Thread(this::startProotEnvironment).start();
+        new Thread(this::startRuntime).start();
     }
 
     /**
-     * 启动 proot + Debian 环境
+     * 启动 Termux Runtime 环境
      */
-    private void startProotEnvironment() {
+    private void startRuntime() {
         try {
-            // 1. 解压 rootfs
-            if (!isRootfsReady()) {
-                Log.i(TAG, "首次启动，解压 rootfs.tar.xz...");
-                extractRootfs();
-                Log.i(TAG, "rootfs 解压完成");
+            // 1. 解压 runtime
+            if (!isRuntimeReady()) {
+                Log.i(TAG, "首次启动，解压 runtime.tar.xz...");
+                extractRuntime();
+                Log.i(TAG, "runtime 解压完成");
             } else {
-                Log.i(TAG, "rootfs 已就绪，跳过解压");
+                Log.i(TAG, "runtime 已就绪，跳过解压");
             }
 
-            // 2. 准备 proot 二进制
-            if (!prepareProotBinary()) {
-                Log.e(TAG, "proot 二进制准备失败");
-                return;
-            }
+            // 2. 确保必要目录和权限
+            prepareRuntime();
 
-            // 3. 准备 init.sh
-            prepareInitScript();
-
-            // 4. 启动 proot
-            Log.i(TAG, "启动 proot 环境...");
-            startProot();
+            // 3. 启动 Node.js
+            Log.i(TAG, "启动 Node.js 服务器...");
+            startNodeServer();
 
         } catch (Exception e) {
-            Log.e(TAG, "启动 proot 环境失败", e);
+            Log.e(TAG, "启动 Runtime 失败", e);
         }
     }
 
     /**
-     * 检查 rootfs 是否已解压
+     * 检查 runtime 是否已解压
      */
-    private boolean isRootfsReady() {
-        return rootfsDir.exists()
-            && new File(rootfsDir, "bin").exists()
-            && new File(rootfsDir, "usr/local/bin/node").exists()
-            && new File(rootfsDir, "opt/control-center/server.js").exists();
+    private boolean isRuntimeReady() {
+        return runtimeDir.exists()
+            && new File(runtimeDir, "bin/node").exists()
+            && new File(runtimeDir, "opt/control-center/server.js").exists();
     }
 
     /**
-     * 解压 rootfs.tar.xz 到应用数据目录
-     * 使用 tar 命令解压 xz 压缩包（Android 系统自带 tar）
+     * 解压 runtime.tar.xz
      */
-    private void extractRootfs() throws IOException {
-        // 复制 rootfs.tar.xz 到内部存储
-        File archiveFile = new File(appDir, "rootfs.tar.xz");
-        Log.i(TAG, "复制 rootfs.tar.xz 到内部存储...");
-        copyAssetToFile("rootfs.tar.xz", archiveFile);
+    private void extractRuntime() throws IOException {
+        File archiveFile = new File(appDir, "runtime.tar.xz");
+        Log.i(TAG, "复制 runtime.tar.xz 到内部存储...");
+        copyAssetToFile("runtime.tar.xz", archiveFile);
 
         // 清理旧数据
-        if (rootfsDir.exists()) {
-            deleteRecursive(rootfsDir);
+        if (runtimeDir.exists()) {
+            deleteRecursive(runtimeDir);
         }
-        rootfsDir.mkdirs();
+        runtimeDir.mkdirs();
 
         // 使用系统 tar 解压
-        Log.i(TAG, "解压 rootfs.tar.xz（过程可能需要几分钟）...");
+        Log.i(TAG, "解压 runtime.tar.xz（可能需要几分钟）...");
         try {
             Process p = new ProcessBuilder(
                 "tar", "-xJf", archiveFile.getAbsolutePath(),
-                "-C", rootfsDir.getAbsolutePath()
+                "-C", runtimeDir.getAbsolutePath()
             ).redirectErrorStream(true).start();
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
             String line;
             while ((line = reader.readLine()) != null) {
-                // 静默解压，tar 通常不输出
+                // 静默解压
             }
             int exitCode = p.waitFor();
             Log.i(TAG, "tar 解压完成，exitCode=" + exitCode);
 
-            // 删除压缩包节省空间
             archiveFile.delete();
-
         } catch (Exception e) {
             Log.e(TAG, "tar 解压失败，尝试备用方案", e);
-            // 备用方案：使用 Java 手动解压 xz + tar
-            extractRootfsManual(archiveFile);
+            extractRuntimeManual(archiveFile);
         }
     }
 
     /**
-     * 备用方案：Java 手动解压（如果系统 tar 不支持 -J）
+     * 备用解压方案
      */
-    private void extractRootfsManual(File archiveFile) throws IOException {
-        Log.i(TAG, "使用 Java 解压 rootfs.tar.xz...");
-        // 先解压 xz 再用 tar 解包
+    private void extractRuntimeManual(File archiveFile) throws IOException {
         try {
-            // 先尝试用 xz 解压
             Process p = new ProcessBuilder(
                 "xz", "-d", "-k", archiveFile.getAbsolutePath()
             ).directory(appDir).redirectErrorStream(true).start();
             p.waitFor();
 
-            File tarFile = new File(appDir, "rootfs.tar");
+            File tarFile = new File(appDir, "runtime.tar");
             if (tarFile.exists()) {
                 Process p2 = new ProcessBuilder(
                     "tar", "-xf", tarFile.getAbsolutePath(),
-                    "-C", rootfsDir.getAbsolutePath()
+                    "-C", runtimeDir.getAbsolutePath()
                 ).redirectErrorStream(true).start();
                 p2.waitFor();
                 tarFile.delete();
@@ -188,109 +170,94 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * 准备 proot 二进制文件
+     * 准备 runtime 环境
      */
-    private boolean prepareProotBinary() {
-        try {
-            if (!prootBin.exists() || prootBin.length() == 0) {
-                Log.i(TAG, "复制 proot 二进制...");
-                copyAssetToFile("proot-aarch64", prootBin);
-            }
+    private void prepareRuntime() {
+        // 确保必要目录
+        ensureDir(new File(runtimeDir, "tmp"));
+        ensureDir(new File(runtimeDir, "root"));
 
-            // 设置可执行权限
-            prootBin.setExecutable(true, false);
-            prootBin.setReadable(true, false);
-
-            Log.i(TAG, "proot 就绪: " + prootBin.getAbsolutePath()
-                + " (" + prootBin.length() + " bytes)");
-            return true;
-        } catch (Exception e) {
-            Log.e(TAG, "proot 准备失败", e);
-            return false;
+        // 设置 node 可执行权限
+        File nodeBin = new File(runtimeDir, "bin/node");
+        if (nodeBin.exists()) {
+            nodeBin.setExecutable(true, false);
         }
-    }
 
-    /**
-     * 准备 init.sh 启动脚本
-     */
-    private void prepareInitScript() {
-        File initScript = new File(rootfsDir, "opt/control-center/init.sh");
+        // 设置 init.sh 可执行权限
+        File initScript = new File(runtimeDir, "opt/control-center/init.sh");
         if (initScript.exists()) {
             initScript.setExecutable(true, false);
-            Log.i(TAG, "init.sh 已就绪");
-        } else {
-            Log.w(TAG, "init.sh 不存在，请检查 rootfs 打包");
         }
+
+        Log.i(TAG, "runtime 环境准备完成");
     }
 
     /**
-     * 启动 proot 进程
-     * proot -r <rootfs> -b /dev -b /proc -b /sys -b /data /opt/control-center/init.sh
+     * 直接启动 Node.js 服务器（无需 proot）
+     *
+     * Termux 的二进制使用 Android 原生 linker (/system/bin/linker64)，
+     * 可以直接通过 Runtime.exec() 运行，无需任何虚拟化。
      */
-    private void startProot() {
+    private void startNodeServer() {
         try {
-            // 确保 rootfs 中有必要的目录
-            ensureDir(new File(rootfsDir, "dev"));
-            ensureDir(new File(rootfsDir, "proc"));
-            ensureDir(new File(rootfsDir, "sys"));
-            ensureDir(new File(rootfsDir, "tmp"));
-            ensureDir(new File(rootfsDir, "data"));
+            String nodePath = new File(runtimeDir, "bin/node").getAbsolutePath();
+            String serverPath = new File(runtimeDir, "opt/control-center/server.js").getAbsolutePath();
+            String libPath = new File(runtimeDir, "lib").getAbsolutePath();
+            String binPath = new File(runtimeDir, "bin").getAbsolutePath();
+            String homePath = new File(runtimeDir, "root").getAbsolutePath();
+            String tmpPath = new File(runtimeDir, "tmp").getAbsolutePath();
 
-            String[] cmd = {
-                prootBin.getAbsolutePath(),
-                "-r", rootfsDir.getAbsolutePath(),
-                "-b", "/dev",
-                "-b", "/proc",
-                "-b", "/sys",
-                "-b", "/data/local/tmp:/tmp",
-                "-0",                          // 模拟 root 用户
-                "-v", "-1",                    // 静默模式
-                "/opt/control-center/init.sh"
-            };
+            ProcessBuilder pb = new ProcessBuilder(
+                nodePath, serverPath
+            );
+            pb.directory(runtimeDir);
 
-            Log.i(TAG, "执行 proot: " + String.join(" ", cmd));
+            // 设置 Termux Runtime 环境变量
+            Map<String, String> env = pb.environment();
+            env.put("LD_LIBRARY_PATH", libPath);
+            env.put("PATH", binPath + ":/system/bin:/system/xbin");
+            env.put("HOME", homePath);
+            env.put("TMPDIR", tmpPath);
+            env.put("PORT", String.valueOf(SERVER_PORT));
+            env.put("PREFIX", runtimeDir.getAbsolutePath());
+            env.put("TERMUX", "true");
+            env.put("TMP", tmpPath);
+            env.put("TERM", "xterm-256color");
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.environment().put("PATH", "/usr/local/bin:/usr/bin:/bin");
-            pb.environment().put("HOME", "/root");
-            pb.environment().put("PORT", String.valueOf(SERVER_PORT));
-            pb.environment().put("TMPDIR", "/tmp");
             pb.redirectErrorStream(true);
 
-            Process prootProcess = pb.start();
+            Log.i(TAG, "启动 Node.js: " + nodePath + " " + serverPath);
+            Log.i(TAG, "LD_LIBRARY_PATH=" + libPath);
 
-            // 读取 proot 输出
+            nodeProcess = pb.start();
+
+            // 读取 Node.js 输出
             new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(prootProcess.getInputStream()))) {
+                        new InputStreamReader(nodeProcess.getInputStream()))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
-                        Log.i(TAG, "[proot] " + line);
-                        // 检测到 Node.js 启动成功
-                        if (line.contains("已启动") || line.contains("listening")) {
-                            prootStarted = true;
-                        }
+                        Log.i(TAG, "[Node] " + line);
                     }
                 } catch (IOException e) {
-                    Log.e(TAG, "读取 proot 输出失败", e);
+                    Log.e(TAG, "读取 Node.js 输出失败", e);
                 }
             }).start();
 
-            // 监控 proot 进程
+            // 监控进程
             new Thread(() -> {
                 try {
-                    int exitCode = prootProcess.waitFor();
-                    Log.e(TAG, "proot 进程退出，exitCode=" + exitCode);
-                    prootStarted = false;
+                    int exitCode = nodeProcess.waitFor();
+                    Log.e(TAG, "Node.js 进程退出，exitCode=" + exitCode);
                 } catch (InterruptedException e) {
-                    Log.e(TAG, "proot 等待被中断", e);
+                    Log.e(TAG, "Node.js 等待被中断", e);
                 }
             }).start();
 
-            Log.i(TAG, "proot 进程已启动");
+            Log.i(TAG, "Node.js 进程已启动");
 
         } catch (Exception e) {
-            Log.e(TAG, "proot 启动失败", e);
+            Log.e(TAG, "Node.js 启动失败", e);
         }
     }
 
@@ -308,18 +275,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    /**
-     * 确保目录存在
-     */
     private void ensureDir(File dir) {
         if (!dir.exists()) {
             dir.mkdirs();
         }
     }
 
-    /**
-     * 递归删除目录
-     */
     private void deleteRecursive(File file) {
         if (file.isDirectory()) {
             File[] children = file.listFiles();
@@ -335,7 +296,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (nodeProcess != null) {
+            nodeProcess.destroy();
+        }
         Log.i(TAG, "应用关闭");
-        // proot 子进程会随应用进程结束而终止
     }
 }

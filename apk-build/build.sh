@@ -29,13 +29,13 @@ ZIPALIGN="$BUILD_TOOLS/zipalign"
 APKSIGNER="$BUILD_TOOLS/apksigner"
 
 # 版本
-VERSION="7.0.0"
-VERSION_CODE="70"
+VERSION="7.1.0"
+VERSION_CODE="71"
 APK_NAME="app-release-v${VERSION_CODE}.apk"
 
 echo "========================================"
 echo " AI Agent 中控台 v${VERSION} 构建"
-echo " 架构: proot + Debian + Node.js + WebView"
+echo " 架构: Termux Runtime + Node.js + WebView"
 echo "========================================"
 
 # 清理
@@ -125,8 +125,7 @@ cd "$SCRIPT_DIR"
 echo "  -> 添加 assets 文件..."
 $BUILD_TOOLS/aapt add "$BUILD_DIR/base.apk" \
     assets/launcher.html \
-    assets/proot-aarch64 \
-    assets/rootfs.tar.xz \
+    assets/runtime.tar.xz \
     2>/dev/null
 
 # 添加 lib 目录（如果有）
