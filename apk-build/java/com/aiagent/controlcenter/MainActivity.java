@@ -29,7 +29,7 @@ import java.util.zip.ZipInputStream;
 public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
     private static final int SERVER_PORT = 3001;
-    private static final String APP_VERSION = "5.0.3";
+    private static final String APP_VERSION = "5.0.4";
     private static final String ASSETS_ZIP = "sillytavern.zip";
 
     private WebView webView;
