@@ -29,7 +29,7 @@ import java.util.zip.ZipInputStream;
 public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
     private static final int SERVER_PORT = 3001;
-    private static final String APP_VERSION = "5.0.5";
+    private static final String APP_VERSION = "5.0.6";
     private static final String ASSETS_ZIP = "sillytavern.zip";
 
     private WebView webView;
@@ -109,7 +109,9 @@ public class MainActivity extends Activity {
 
                 // 1. 检查 Native 库加载
                 if (!NodeBridge.isLoaded()) {
-                    throw new RuntimeException("Native libraries (libnode.so / libnode-bridge.so) failed to load");
+                    String err = NodeBridge.getLastError();
+                    Log.e(TAG, "Native lib load failed: " + err);
+                    throw new RuntimeException("Native 库加载失败: " + err);
                 }
                 Log.i(TAG, "Native libraries loaded OK");
 

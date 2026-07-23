@@ -9,24 +9,42 @@ import android.util.Log;
 public class NodeBridge {
     private static final String TAG = "NodeBridge";
     private static boolean librariesLoaded = false;
+    private static String lastError = "";
 
     static {
+        String failedLib = "";
         try {
+            failedLib = "libc++_shared.so";
             System.loadLibrary("c++_shared");
-            Log.d(TAG, "libc++_shared.so loaded");
+            Log.d(TAG, "libc++_shared.so loaded OK");
+
+            failedLib = "libnode.so";
             System.loadLibrary("node");
-            Log.d(TAG, "libnode.so loaded");
+            Log.d(TAG, "libnode.so loaded OK");
+
+            failedLib = "libnode-bridge.so";
             System.loadLibrary("node-bridge");
-            Log.d(TAG, "libnode-bridge.so loaded");
+            Log.d(TAG, "libnode-bridge.so loaded OK");
+
             librariesLoaded = true;
+            lastError = "";
         } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "Failed to load native libraries: " + e.getMessage(), e);
+            lastError = "Failed to load " + failedLib + ": " + e.getMessage();
+            Log.e(TAG, lastError, e);
+            librariesLoaded = false;
+        } catch (Exception e) {
+            lastError = "Exception loading " + failedLib + ": " + e.toString();
+            Log.e(TAG, lastError, e);
             librariesLoaded = false;
         }
     }
 
     public static boolean isLoaded() {
         return librariesLoaded;
+    }
+
+    public static String getLastError() {
+        return lastError;
     }
 
     /**
