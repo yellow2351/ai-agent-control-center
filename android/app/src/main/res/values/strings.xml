@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AI Agent 中控台</string>
+    <string name="title_activity_main">AI Agent 中控台</string>
+    <string name="package_name">com.aiagent.controlcenter</string>
+    <string name="custom_url_scheme">com.aiagent.controlcenter</string>
+</resources>

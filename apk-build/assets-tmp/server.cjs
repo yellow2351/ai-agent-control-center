@@ -22199,8 +22199,8 @@ var require_application = __commonJS({
       tryRender(view, renderOptions, done);
     };
     app2.listen = function listen() {
-      var server2 = http.createServer(this);
-      return server2.listen.apply(server2, arguments);
+      var server = http.createServer(this);
+      return server.listen.apply(server, arguments);
     };
     function logerror(err) {
       if (this.get("env") !== "test") console.error(err.stack || err.toString());
@@ -24538,12 +24538,12 @@ var require_main = __commonJS({
   }
 });
 
-// api/server.ts
-var server_exports = {};
-__export(server_exports, {
-  default: () => server_default
+// api/index.ts
+var index_exports = {};
+__export(index_exports, {
+  default: () => handler
 });
-module.exports = __toCommonJS(server_exports);
+module.exports = __toCommonJS(index_exports);
 
 // api/app.ts
 var import_express2 = __toESM(require_express2(), 1);
@@ -25032,28 +25032,10 @@ app.use((req, res) => {
 });
 var app_default = app;
 
-// api/server.ts
-var PORT = Number(process.env.PORT) || 3001;
-var server = app_default.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server ready on port ${PORT}`);
-  console.log(`Local:   http://localhost:${PORT}`);
-  console.log(`Network: http://0.0.0.0:${PORT}`);
-});
-process.on("SIGTERM", () => {
-  console.log("SIGTERM signal received");
-  server.close(() => {
-    console.log("Server closed");
-    process.exit(0);
-  });
-});
-process.on("SIGINT", () => {
-  console.log("SIGINT signal received");
-  server.close(() => {
-    console.log("Server closed");
-    process.exit(0);
-  });
-});
-var server_default = app_default;
+// api/index.ts
+function handler(req, res) {
+  return app_default(req, res);
+}
 /*! Bundled license information:
 
 depd/index.js:
