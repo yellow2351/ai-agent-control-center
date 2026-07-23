@@ -11,6 +11,7 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
@@ -28,6 +29,7 @@ public class MainActivity extends Activity {
     private File prefixDir;
     private File dataDir;
     private Handler mainHandler;
+    private StringBuilder debugLog;
     private static final int SERVER_PORT = 3001;
     private static final String BOOTSTRAP_ASSET = "bootstrap-aarch64.zip";
     private static final String SERVER_FILE = "server.cjs";
@@ -39,6 +41,7 @@ public class MainActivity extends Activity {
         prefixDir = new File(getFilesDir(), "usr");
         dataDir = new File(getFilesDir(), "app-data");
         mainHandler = new Handler(Looper.getMainLooper());
+        debugLog = new StringBuilder();
 
         webView = new WebView(this);
         setContentView(webView);
@@ -67,6 +70,10 @@ public class MainActivity extends Activity {
         t.start();
     }
 
+    private void log(String msg) {
+        debugLog.append(msg).append("\n");
+    }
+
     private class MyWebViewClient extends WebViewClient {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, String url) {
@@ -79,16 +86,42 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             try {
+                log("开始初始化...");
+                log("filesDir: " + getFilesDir().getAbsolutePath());
+                log("prefixDir: " + prefixDir.getAbsolutePath());
+
                 if (!isBootstrapInstalled()) {
+                    log("Bootstrap 未安装，开始解压...");
                     installBootstrap();
+                    log("Bootstrap 解压完成");
+                } else {
+                    log("Bootstrap 已安装");
                 }
+
+                log("开始修复权限...");
                 fixPermissions();
+                log("权限修复完成");
+
+                File nodeBin = new File(prefixDir, "bin/node");
+                log("node 文件存在: " + nodeBin.exists());
+                log("node 可执行: " + nodeBin.canExecute());
+                log("node 可读: " + nodeBin.canRead());
+                log("node 路径: " + nodeBin.getAbsolutePath());
+
                 copyServerFile();
+                log("服务文件已复制");
+
                 startNodeServer();
+                log("Node 服务已启动");
+
                 waitForServer();
+                log("服务端口已就绪");
+
                 mainHandler.post(new LoadUrlRunnable());
             } catch (Exception e) {
-                mainHandler.post(new ErrorRunnable(e.getMessage()));
+                log("错误: " + e.getMessage());
+                String fullError = e.getMessage() + "\n\n--- 调试日志 ---\n" + debugLog.toString();
+                mainHandler.post(new ErrorRunnable(fullError));
             }
         }
     }
@@ -122,10 +155,10 @@ public class MainActivity extends Activity {
     }
 
     private void showLoadingError(String error) {
-        String html = "<html><body style='background:#e0e5ec;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:system-ui'>" +
-            "<div style='text-align:center;color:#333;padding:24px'>" +
+        String html = "<html><body style='background:#e0e5ec;margin:0;font-family:system-ui;padding:16px'>" +
+            "<div style='color:#333'>" +
             "<div style='font-size:20px;font-weight:600;margin-bottom:12px;color:#dc2626'>启动失败</div>" +
-            "<div style='font-size:14px;color:#666'>" + escapeHtml(error) + "</div>" +
+            "<div style='font-size:14px;color:#666;white-space:pre-wrap;word-break:break-all'>" + escapeHtml(error) + "</div>" +
             "</div></body></html>";
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }
@@ -171,34 +204,63 @@ public class MainActivity extends Activity {
         is.close();
 
         createSymlinks();
-        fixPermissions();
     }
 
     private void fixPermissions() {
+        String chmodPath = "/system/bin/chmod";
+
+        File binDir = new File(prefixDir, "bin");
+        if (binDir.exists()) {
+            try {
+                Process p = Runtime.getRuntime().exec(
+                    new String[]{chmodPath, "-R", "755", binDir.getAbsolutePath()});
+                p.waitFor();
+                log("chmod bin 结果: " + p.exitValue());
+            } catch (Exception e) {
+                log("chmod bin 失败: " + e.getMessage());
+            }
+        }
+
+        File libDir = new File(prefixDir, "lib");
+        if (libDir.exists()) {
+            try {
+                Process p = Runtime.getRuntime().exec(
+                    new String[]{chmodPath, "-R", "755", libDir.getAbsolutePath()});
+                p.waitFor();
+                log("chmod lib 结果: " + p.exitValue());
+            } catch (Exception e) {
+                log("chmod lib 失败: " + e.getMessage());
+            }
+        }
+
+        File tmpDir = new File(prefixDir, "tmp");
+        if (!tmpDir.exists()) {
+            tmpDir.mkdirs();
+        }
         try {
-            File binDir = new File(prefixDir, "bin");
-            File libDir = new File(prefixDir, "lib");
-
-            if (binDir.exists()) {
-                Process chmodBin = Runtime.getRuntime().exec(
-                    new String[]{"chmod", "-R", "755", binDir.getAbsolutePath()});
-                chmodBin.waitFor();
-            }
-
-            if (libDir.exists()) {
-                Process chmodLib = Runtime.getRuntime().exec(
-                    new String[]{"chmod", "-R", "755", libDir.getAbsolutePath()});
-                chmodLib.waitFor();
-            }
-
-            File tmpDir = new File(prefixDir, "tmp");
-            if (!tmpDir.exists()) {
-                tmpDir.mkdirs();
-            }
-            Process chmodTmp = Runtime.getRuntime().exec(
-                new String[]{"chmod", "777", tmpDir.getAbsolutePath()});
-            chmodTmp.waitFor();
+            Process p = Runtime.getRuntime().exec(
+                new String[]{chmodPath, "777", tmpDir.getAbsolutePath()});
+            p.waitFor();
+            log("chmod tmp 结果: " + p.exitValue());
         } catch (Exception e) {
+            log("chmod tmp 失败: " + e.getMessage());
+        }
+
+        File nodeBin = new File(prefixDir, "bin/node");
+        if (nodeBin.exists()) {
+            boolean execOk = nodeBin.canExecute();
+            log("node canExecute: " + execOk);
+            if (!execOk) {
+                try {
+                    Process p = Runtime.getRuntime().exec(
+                        new String[]{chmodPath, "755", nodeBin.getAbsolutePath()});
+                    p.waitFor();
+                    log("chmod node 结果: " + p.exitValue());
+                } catch (Exception e) {
+                    log("chmod node 失败: " + e.getMessage());
+                }
+                log("node canExecute 再次检查: " + nodeBin.canExecute());
+            }
         }
     }
 
@@ -281,21 +343,37 @@ public class MainActivity extends Activity {
 
         pb.directory(getFilesDir());
 
-        nodeProcess = pb.start();
+        try {
+            nodeProcess = pb.start();
+        } catch (IOException e) {
+            String extra = "启动失败详情: " + e.getMessage() +
+                "\nnode路径: " + nodeBin.getAbsolutePath() +
+                "\nnode存在: " + nodeBin.exists() +
+                "\nnode可执行: " + nodeBin.canExecute() +
+                "\n工作目录: " + getFilesDir().getAbsolutePath() +
+                "\n\n环境变量:" +
+                "\nPATH=" + env.get("PATH") +
+                "\nLD_LIBRARY_PATH=" + env.get("LD_LIBRARY_PATH");
+            throw new IOException(extra, e);
+        }
 
         InputStream stdout = nodeProcess.getInputStream();
         InputStream stderr = nodeProcess.getErrorStream();
 
-        Thread outThread = new Thread(new StreamReader(stdout));
+        Thread outThread = new Thread(new StreamReader(stdout, false));
         outThread.start();
 
-        Thread errThread = new Thread(new StreamReader(stderr));
+        Thread errThread = new Thread(new StreamReader(stderr, true));
         errThread.start();
     }
 
-    private static class StreamReader implements Runnable {
+    private class StreamReader implements Runnable {
         private InputStream is;
-        StreamReader(InputStream is) { this.is = is; }
+        private boolean isError;
+        StreamReader(InputStream is, boolean isError) {
+            this.is = is;
+            this.isError = isError;
+        }
         @Override
         public void run() {
             try {
