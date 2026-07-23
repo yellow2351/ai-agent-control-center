@@ -121,9 +121,9 @@ function poll() {
     showError(
       '服务启动超时（' + MAX_WAIT + '秒）<br><br>' +
       '可能原因：<br>' +
-      '&bull; rootfs 解压尚未完成（首次启动需数分钟）<br>' +
+      '&bull; runtime 解压尚未完成（首次启动需数分钟）<br>' +
       '&bull; 存储空间不足<br>' +
-      '&bull; 设备不支持 proot<br><br>' +
+      '&bull; 设备兼容性问题<br><br>' +
       '请关闭应用后重新打开重试'
     );
     addLog('[失败] 超时，已等待 ' + elapsed + ' 秒', 'err');
@@ -131,7 +131,7 @@ function poll() {
 }
 
 function startPolling() {
-  addLog('架构: proot + Debian rootfs + Node.js', 'ok');
+  addLog('架构: Termux Runtime + Node.js 26.4.0', 'ok');
   addLog('轮询 http://127.0.0.1:3001/api/health...');
   setProgress(5);
   pollTimer = setInterval(poll, 1500);
